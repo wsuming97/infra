@@ -260,9 +260,11 @@ ENV
 # ============================================================
 get_server_ip() {
     local ip
-    ip=$(curl -s --max-time 3 ifconfig.me 2>/dev/null || \
-         curl -s --max-time 3 ip.sb 2>/dev/null || \
-         hostname -I 2>/dev/null | awk '{print $1}' || \
+    # 强制使用 IPv4（-4 参数），避免返回 IPv6 地址
+    ip=$(curl -4 -s --max-time 3 ifconfig.me 2>/dev/null || \
+         curl -4 -s --max-time 3 ip.sb 2>/dev/null || \
+         curl -4 -s --max-time 3 icanhazip.com 2>/dev/null || \
+         hostname -I 2>/dev/null | grep -oP '\d+\.\d+\.\d+\.\d+' | head -1 || \
          echo "your-server-ip")
     echo "$ip"
 }
