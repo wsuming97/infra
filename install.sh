@@ -259,14 +259,20 @@ ENV
 # 工具函数
 # ============================================================
 get_server_ip() {
-    local ip
-    # 强制使用 IPv4（-4 参数），避免返回 IPv6 地址
-    ip=$(curl -4 -s --max-time 3 ifconfig.me 2>/dev/null || \
-         curl -4 -s --max-time 3 ip.sb 2>/dev/null || \
-         curl -4 -s --max-time 3 icanhazip.com 2>/dev/null || \
-         hostname -I 2>/dev/null | grep -oP '\d+\.\d+\.\d+\.\d+' | head -1 || \
-         echo "your-server-ip")
-    echo "$ip"
+    local ip=""
+    local ipv4_regex='[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'
+
+    # 依次尝试外部服务获取公网 IPv4
+    for url in ifconfig.me ip.sb icanhazip.com; do
+        ip=$(curl -4 -s --max-time 3 "$url" 2>/dev/null | grep -Eo "$ipv4_regex" | head -1)
+        [ -n "$ip" ] && echo "$ip" && return
+    done
+
+    # 回退到本机网卡 IPv4
+    ip=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -Eo "$ipv4_regex" | head -1)
+    [ -n "$ip" ] && echo "$ip" && return
+
+    echo "your-server-ip"
 }
 
 # ============================================================
