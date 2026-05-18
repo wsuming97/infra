@@ -1,0 +1,107 @@
+# ============================================================
+# 基础设施统一编排 — CPA + New API + PostgreSQL + Redis
+# 
+# 用法：
+#   1. 复制 .env.example 为 .env，修改密码等配置
+#   2. docker compose up -d
+#   3. playground / monitor 通过 --proxy 指向本机 8317 端口
+#
+# 端口规划：
+#   8317  — CPA (CLI Proxy API)
+#   3480  — New API (多渠道 Key 管理)
+#   5432  — PostgreSQL（仅内部网络，不对外暴露）
+#   6379  — Redis（仅内部网络，不对外暴露）
+# ============================================================
+
+services:
+
+  # ── PostgreSQL 共享实例 ──────────────────────────────────
+  # 同时承载 CPA 和 New API 两个数据库，节省资源
+  postgres:
+    image: postgres:16-alpine
+    container_name: infra-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${PG_SUPERUSER:-postgres}
+      - POSTGRES_PASSWORD=${PG_SUPERUSER_PASSWORD:-postgres123}
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro   # 首次启动自动建库建用户
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - infra-net
+
+  # ── Redis（New API 依赖）─────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: infra-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - infra-net
+
+  # ── CPA (CLI Proxy API) ─────────────────────────────────
+  cli-proxy-api:
+    image: eceasy/cli-proxy-api:latest
+    container_name: cli-proxy-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - TZ=Asia/Shanghai
+      - MANAGEMENT_PASSWORD=${CPA_MANAGEMENT_PASSWORD:-changeme}
+      - MANAGEMENT_STATIC_PATH=/tmp
+      - PGSTORE_LOCAL_PATH=/tmp
+      - PGSTORE_DSN=postgres://${CPA_DB_USER:-cliproxy}:${CPA_DB_PASSWORD:-cliproxy123}@postgres:5432/${CPA_DB_NAME:-cliproxy}?sslmode=disable
+      # 代理配置（按需开启，没有科学上网可注释掉）
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=localhost,127.0.0.1,postgres,redis
+    ports:
+      - "${CPA_PORT:-8317}:8317"
+    volumes:
+      - ./cpa-data:/tmp
+    networks:
+      - infra-net
+
+  # ── New API（多渠道 Key 管理）────────────────────────────
+  new-api:
+    image: calciumion/new-api:latest
+    container_name: new-api
+    restart: unless-stopped
+    command: --log-dir /app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - SQL_DSN=postgresql://${NEWAPI_DB_USER:-newapi}:${NEWAPI_DB_PASSWORD:-newapi123}@postgres:5432/${NEWAPI_DB_NAME:-newapi}?sslmode=disable
+      - REDIS_CONN_STRING=redis://redis:6379
+      - TZ=Asia/Shanghai
+    ports:
+      - "${NEWAPI_PORT:-3480}:3000"
+    volumes:
+      - ./newapi-data:/data
+      - ./newapi-logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\"success\":\\s*true' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - infra-net
+
+networks:
+  infra-net:
+    driver: bridge
