@@ -391,10 +391,18 @@ do_update() {
 
     generate_env "$cpa_port" "$newapi_port" "$pg_pass" "$cpa_mgmt_pass" "$proxy"
 
+    # 如果 CPA 管理密码发生变更，清除缓存使新密码生效
+    if [ -n "$CPA_MGMT_PASSWORD" ] && [ "$CPA_MGMT_PASSWORD" != "$current_cpa_mgmt_pass" ]; then
+        warn "检测到 CPA 管理密码变更，清除密码缓存..."
+        $COMPOSE_CMD stop cli-proxy-api 2>/dev/null || true
+        rm -rf "$INSTALL_DIR/cpa-data/"*
+        ok "CPA 密码缓存已清除"
+    fi
+
     # 拉取最新镜像并重启
     info "拉取最新镜像并重启容器..."
     $COMPOSE_CMD pull
-    $COMPOSE_CMD up -d
+    $COMPOSE_CMD up -d --force-recreate
 
     local server_ip
     server_ip=$(get_server_ip)
