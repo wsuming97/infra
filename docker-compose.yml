@@ -68,7 +68,7 @@ services:
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - NO_PROXY=localhost,127.0.0.1,postgres,redis
     ports:
-      - "${CPA_PORT:-8317}:8317"
+      - "127.0.0.1:${CPA_PORT:-8317}:8317"
     volumes:
       - ./cpa-data:/tmp
     networks:
