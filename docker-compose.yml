@@ -33,6 +33,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    ports:
+      - "127.0.0.1:5432:5432"  # CPA host 模式需要通过本地端口访问
     networks:
       - infra-net
 
@@ -50,10 +52,13 @@ services:
       - infra-net
 
   # ── CPA (CLI Proxy API) ─────────────────────────────────
+  # 使用 host 网络模式，让 CPA 看到真实客户端 IP
+  # 这样扫描器被 ban 不会连累正常用户（不再共享 Docker 内网 IP）
   cli-proxy-api:
     image: eceasy/cli-proxy-api:latest
     container_name: cli-proxy-api
     restart: unless-stopped
+    network_mode: host
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,18 +67,14 @@ services:
       - MANAGEMENT_PASSWORD=${CPA_MANAGEMENT_PASSWORD:-changeme}
       - MANAGEMENT_STATIC_PATH=/tmp
       - PGSTORE_LOCAL_PATH=/tmp
-      - PGSTORE_DSN=postgres://${CPA_DB_USER:-cliproxy}:${CPA_DB_PASSWORD:-cliproxy123}@postgres:5432/${CPA_DB_NAME:-cliproxy}?sslmode=disable
+      # host 模式下不能用 Docker DNS，通过 127.0.0.1 访问宿主机上映射的 PostgreSQL
+      - PGSTORE_DSN=postgres://${CPA_DB_USER:-cliproxy}:${CPA_DB_PASSWORD:-cliproxy123}@127.0.0.1:5432/${CPA_DB_NAME:-cliproxy}?sslmode=disable
       # 代理配置（按需开启，没有科学上网可注释掉）
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - NO_PROXY=localhost,127.0.0.1,postgres,redis
-    ports:
-      - "127.0.0.1:${CPA_PORT:-8317}:8317"
-      - "172.17.0.1:${CPA_PORT:-8317}:8317"  # Docker 网桥，业务容器通过 host.docker.internal 访问
     volumes:
       - ./cpa-data:/tmp
-    networks:
-      - infra-net
 
   # ── New API（多渠道 Key 管理）────────────────────────────
   new-api:
